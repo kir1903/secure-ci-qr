@@ -1,0 +1,37 @@
+services:
+  redis:
+    image: redis:7-alpine
+
+  qr-service:
+    build:
+      context: ./qr-service
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  qr-worker:
+    build:
+      context: ./qr-service
+    command: ["celery", "-A", "app.celery", "worker", "--loglevel=info"]
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  gateway:
+    build:
+      context: ./gateway
+    environment:
+      - QR_SERVICE_URL=http://qr-service:5001
+      - ALLOWED_ORIGINS=http://localhost:8080
+    depends_on:
+      - qr-service
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "8080:8080"
+    depends_on:
+      - gateway
