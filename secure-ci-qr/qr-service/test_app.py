@@ -7,7 +7,7 @@ from app import app, create_qr_task
 
 @pytest.fixture
 def client():
-    app.config["TESTING"] = True
+    app.testing = True
     with app.test_client() as client:
         yield client
 

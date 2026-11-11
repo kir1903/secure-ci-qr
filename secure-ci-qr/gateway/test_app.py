@@ -9,7 +9,7 @@ TASK_ID = "3f2a9c1e-5b7d-4e8a-9c21-7d4e5f6a8b90"
 
 @pytest.fixture
 def client():
-    app.config["TESTING"] = True
+    app.testing = True
     with app.test_client() as client:
         yield client
 
@@ -69,6 +69,15 @@ def test_generate_when_qr_service_down_returns_502_without_details(client):
 
     assert response.status_code == 502
     assert "qr-service:5001" not in response.get_data(as_text=True)
+
+
+@responses.activate
+def test_status_when_qr_service_returns_error_gives_502(client):
+    responses.add(responses.GET, QR_SERVICE_STATUS_URL + TASK_ID, json={"error": "boom"}, status=500)
+
+    response = client.get(f"/api/status/{TASK_ID}")
+
+    assert response.status_code == 502
 
 
 def test_status_with_invalid_task_id_returns_400(client):

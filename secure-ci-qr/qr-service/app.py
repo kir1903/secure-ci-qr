@@ -11,6 +11,8 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+# Имитация долгой обработки (секунды), задаётся через окружение; 0 — без задержки
+TASK_DELAY_SECONDS = float(os.environ.get("QR_TASK_DELAY", "5"))
 MAX_TEXT_LENGTH = 1000
 
 app.config.update(CELERY_BROKER_URL=REDIS_URL, CELERY_RESULT_BACKEND=REDIS_URL)
@@ -34,7 +36,8 @@ def create_qr_task(text: str):
 
     img = qr.make_image(fill_color="black", back_color="white")
 
-    time.sleep(5)  # имитация долгой обработки
+    if TASK_DELAY_SECONDS > 0:
+        time.sleep(TASK_DELAY_SECONDS)
 
     img_buffer = io.BytesIO()
     img.save(img_buffer, format="PNG")
@@ -69,8 +72,9 @@ def get_status(task_id):
     if task.state != "FAILURE":
         return jsonify({"status": "SUCCESS", "image_base64": task.info}), 200
 
+    # Запрос статуса выполнен успешно, а сама задача завершилась с ошибкой
     logger.error("QR task %s failed: %s", task_id, task.info)
-    return jsonify({"status": "FAILURE", "error": "QR generation failed"}), 500
+    return jsonify({"status": "FAILURE", "error": "QR generation failed"}), 200
 
 
 if __name__ == "__main__":

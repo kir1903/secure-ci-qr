@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 
 import requests
 from flask import Flask, jsonify, request
@@ -22,9 +23,12 @@ REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "5"))
 MAX_TEXT_LENGTH = 1000
 
 
-def _validate_task_id(task_id: str) -> bool:
-    """task_id — это UUID Celery: только hex-символы и дефисы."""
-    return 0 < len(task_id) <= 64 and all(c in "0123456789abcdef-" for c in task_id.lower())
+def _normalize_task_id(task_id: str):
+    """task_id — это UUID задачи Celery. Возвращает нормализованный UUID или None."""
+    try:
+        return str(uuid.UUID(task_id))
+    except ValueError:
+        return None
 
 
 @app.route("/api/generate", methods=["POST"])
@@ -39,28 +43,32 @@ def generate_qr():
 
     try:
         response = requests.post(QR_SERVICE_GENERATE_URL, json={"text": text}, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
     except requests.RequestException:
-        logger.exception("QR service is unavailable")
+        logger.exception("QR service request failed")
         return jsonify({"error": "QR service is unavailable"}), 502
 
-    if response.status_code != 202:
-        return jsonify({"error": "QR task failed"}), 502
-
-    return jsonify(response.json()), 202
+    return jsonify({"task_id": response.json().get("task_id")}), 202
 
 
 @app.route("/api/status/<task_id>", methods=["GET"])
 def check_status(task_id):
-    if not _validate_task_id(task_id):
+    safe_task_id = _normalize_task_id(task_id)
+    if safe_task_id is None:
         return jsonify({"error": "Invalid task id"}), 400
 
+    # Защита от SSRF: адрес внутреннего сервиса фиксирован в конфигурации, а в путь
+    # подставляется только проверенный и нормализованный UUID, поэтому запрос
+    # не может уйти на другой хост или другой путь.
+    status_url = f"{QR_SERVICE_STATUS_URL}{safe_task_id}"
     try:
-        response = requests.get(f"{QR_SERVICE_STATUS_URL}{task_id}", timeout=REQUEST_TIMEOUT)
+        response = requests.get(status_url, timeout=REQUEST_TIMEOUT)  # nosemgrep: python.flask.security.injection.ssrf-requests
+        response.raise_for_status()
     except requests.RequestException:
-        logger.exception("QR service is unavailable")
+        logger.exception("QR service request failed")
         return jsonify({"error": "QR service is unavailable"}), 502
 
-    return jsonify(response.json()), response.status_code
+    return jsonify(response.json()), 200
 
 
 if __name__ == "__main__":
